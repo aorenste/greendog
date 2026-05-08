@@ -1,5 +1,27 @@
+# Local greendog output
 runs/
 cache/
+
+# Local credentials and environment
+.env
+.env.*
+!.env.example
+.claude/settings.local.json
+
+# Python bytecode and caches
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
 .venv/
+venv/
+env/
+
+# Packaging/build output
+*.egg-info/
+build/
+dist/

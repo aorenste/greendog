@@ -54,6 +54,13 @@ failures on pytorch/pytorch.  Here is the design space we live in:
 - There are a HUGE number of configs. It will be important to subdivide the
   problem appropriately into subagents.
 
+## Repo workflow
+
+- After making repository changes, automatically stage relevant files and
+  commit them before reporting back, unless the user explicitly asks not to
+  commit. Do not include generated artifacts, caches, virtualenvs, credentials,
+  or unrelated user changes in the commit.
+
 ## Analysis methodology
 
 When analyzing CI health, follow this approach:
@@ -245,3 +252,27 @@ Traps to avoid when investigating CI failures:
   wrong (TD excluded it? no, `--dynamo` excluded it? no, wrong shard?
   no, it ran and passed — it's actually merge skew). Follow the evidence
   step by step.
+
+## Marking CI jobs as unstable
+
+When a job is persistently broken and not worth blocking on, there are
+two mechanisms to mark it "unstable":
+
+1. **Add "unstable" to the job name in the workflow YAML.** The trymerge
+   bot (`trymerge.py:~1858`) checks `if "unstable" in name` and ignores
+   failures for such jobs. Example: a test-matrix entry like
+   `{ config: "foo", runner: "...", unstable }` produces a job name
+   containing "unstable". This is the lightweight option for individual
+   jobs within an otherwise stable workflow.
+
+2. **Move the job from `trunk.yml` / its own workflow into
+   `unstable.yml`.** The unstable workflow
+   (`.github/workflows/unstable.yml`) runs on every push to main but is
+   NOT in `mandatory_checks_name` in `merge_rules.yaml`, so it never
+   blocks merging. Jobs graduate back to trunk when red rate < 5% and
+   TTS < 3h.
+
+Merge rules (`merge_rules.yaml`) only mandate `pull`, `Lint`, `EasyCLA`
+(and sometimes `trunk`, `inductor`). Workflows like `dynamo-unittest`
+are already non-mandatory — failures there don't block merging but do
+create noise in trunk health and may trigger autorevert.
