@@ -6,6 +6,16 @@ from typing import Any
 
 FAILURE_CONCLUSIONS = {"failure", "cancelled", "timed_out"}
 
+# Jobs marked unstable upstream — actively managed, not actionable for sitrep.
+# Each entry is a substring match against the full job name.
+KNOWN_UNSTABLE_JOBS = [
+    "vllm",  # tracked in pytorch/pytorch#178678, huydhn managing
+]
+
+
+def _is_known_unstable(name: str) -> bool:
+    return any(pat in name for pat in KNOWN_UNSTABLE_JOBS)
+
 
 def render(data: dict) -> str:
     parts = [
@@ -76,15 +86,22 @@ def _section_head(grid: dict) -> str:
     ]
     failures = []
     success = pending = 0
+    suppressed = 0
     for i, job in enumerate(head.get("jobs", [])):
         c = job.get("conclusion")
+        name = _job_name(job_names, i)
         if _is_failure(c):
-            failures.append((_job_name(job_names, i), job))
+            if _is_known_unstable(name):
+                suppressed += 1
+            else:
+                failures.append((name, job))
         elif c == "success":
             success += 1
         else:
             pending += 1
     out.append(f"jobs: {success} green · {len(failures)} red · {pending} pending/missing")
+    if suppressed:
+        out.append(f"_({suppressed} known-unstable red jobs suppressed)_")
     if failures:
         out += ["", "### Red jobs on HEAD"]
         for name, job in failures[:30]:
@@ -122,7 +139,9 @@ def _section_persistent(grid: dict) -> str:
             else:
                 st["other"] += 1
     persistent = [
-        (i, st) for i, st in states.items() if st["fail"] >= 3 and st["success"] == 0
+        (i, st)
+        for i, st in states.items()
+        if st["fail"] >= 3 and st["success"] == 0 and not _is_known_unstable(_job_name(job_names, i))
     ]
     persistent.sort(key=lambda x: -x[1]["fail"])
     if not persistent:
@@ -190,7 +209,9 @@ def _section_unclear(
             if prev == "success" and _is_failure(c):
                 sha = row["sha"]
                 if sha not in autorev_shas and sha not in verdict_shas:
-                    transitions.append((sha, j, jobs[j]))
+                    name = _job_name(job_names, j)
+                    if not _is_known_unstable(name):
+                        transitions.append((sha, j, jobs[j]))
             if c in FAILURE_CONCLUSIONS or c == "success":
                 prev = c
     if not transitions:
