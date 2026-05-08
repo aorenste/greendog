@@ -41,14 +41,35 @@ def _section_sevs(sevs: list[dict]) -> str:
     return "\n".join(out)
 
 
+def _pick_mature_commit(rows: list[dict]) -> tuple[int, dict]:
+    """Find the most recent commit where per-commit CI has largely completed.
+
+    The job grid includes periodic/nightly slots that don't run on every commit,
+    so even a "fully done" commit only reaches ~27% concluded.  We pick the
+    first commit with at least 25% concluded and at least 250 concluded jobs,
+    which filters out commits whose CI just started.
+    """
+    for idx, row in enumerate(rows):
+        jobs = row.get("jobs") or []
+        total = len(jobs)
+        if total == 0:
+            continue
+        concluded = sum(1 for j in jobs if j.get("conclusion"))
+        if concluded >= 250 and concluded >= total * 0.25:
+            return idx, row
+    return 0, rows[0]
+
+
 def _section_head(grid: dict) -> str:
     rows = grid["shaGrid"]
     job_names = grid["jobNames"]
-    out = ["## Trunk HEAD"]
+    out = ["## Trunk HEAD (most recent commit with CI results)"]
     if not rows:
         out += ["_no commits in window_", ""]
         return "\n".join(out)
-    head = rows[0]
+    head_idx, head = _pick_mature_commit(rows)
+    if head_idx > 0:
+        out.append(f"_skipped {head_idx} newer commit(s) with mostly pending jobs_")
     out += [
         f"`{head['sha'][:8]}` — {head.get('commitTitle','')}",
         f"author: {head.get('author','?')}  ·  time: {head.get('time','?')}",

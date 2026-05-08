@@ -8,7 +8,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import auth
+from .benchmark import cmd_benchmark
 from .client import HudClient, PROJECT_ROOT
+from .diff import render_diff
 from .fetch import collect
 from .report import render
 
@@ -48,6 +50,18 @@ def cmd_report(args):
     print(f"\n[wrote {out}]", file=sys.stderr)
 
 
+def cmd_diff(args):
+    def _load(path_str):
+        p = Path(path_str)
+        raw = p / "raw.json" if p.is_dir() else p
+        return json.loads(raw.read_text())
+
+    before = _load(args.before)
+    after = _load(args.after)
+    report = render_diff(before, after)
+    print(report)
+
+
 def main():
     ap = argparse.ArgumentParser(prog="greendog")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -62,10 +76,33 @@ def main():
     p_report.set_defaults(func=cmd_report)
 
     p_auth = sub.add_parser(
-        "auth", help="grab hud.pytorch.org cookies from Chrome (refresh when 429)"
+        "auth", help="configure HUD auth (bot token or Chrome cookies)"
     )
+    p_auth.add_argument("--bot-token", help="HUD internal bot token (from Keeper)")
     p_auth.add_argument("--user-agent", help="override Chrome UA string")
     p_auth.set_defaults(func=auth.cmd_auth)
+
+    p_bench = sub.add_parser(
+        "benchmark", help="fetch benchmark time series from HUD"
+    )
+    p_bench.add_argument("--start", required=True, help="start time (ISO 8601)")
+    p_bench.add_argument("--stop", required=True, help="stop time (ISO 8601)")
+    p_bench.add_argument("--arch", default="h100", help="GPU arch (default: h100)")
+    p_bench.add_argument("--device", default="cuda", help="device (default: cuda)")
+    p_bench.add_argument("--dtype", default="bfloat16", help="dtype (default: bfloat16)")
+    p_bench.add_argument("--mode", default="inference", help="mode (default: inference)")
+    p_bench.add_argument("--suites", help="comma-separated suites (default: torchbench,huggingface,timm_models)")
+    p_bench.add_argument("--granularity", default="hour", help="time granularity (default: hour)")
+    p_bench.add_argument("--left-commit", help="left commit SHA for comparison")
+    p_bench.add_argument("--right-commit", help="right commit SHA for comparison")
+    p_bench.add_argument("--raw", action="store_true", help="output raw JSON")
+    p_bench.add_argument("--offline", action="store_true", help="cache only, no network")
+    p_bench.set_defaults(func=cmd_benchmark)
+
+    p_diff = sub.add_parser("diff", help="compare two runs: what broke, healed, persists")
+    p_diff.add_argument("before", help="path to earlier runs/{ts} dir or raw.json")
+    p_diff.add_argument("after", help="path to later runs/{ts} dir or raw.json")
+    p_diff.set_defaults(func=cmd_diff)
 
     args = ap.parse_args()
     args.func(args)

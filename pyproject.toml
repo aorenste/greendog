@@ -1,0 +1,18 @@
+[project]
+name = "greendog"
+version = "0.1.0"
+description = "Investigate and fix master CI failures on pytorch/pytorch"
+requires-python = ">=3.10"
+dependencies = [
+    "curl_cffi",
+]
+
+[project.scripts]
+greendog = "greendog.__main__:main"
+
+[tool.setuptools]
+packages = ["greendog"]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
