@@ -276,3 +276,30 @@ Merge rules (`merge_rules.yaml`) only mandate `pull`, `Lint`, `EasyCLA`
 (and sometimes `trunk`, `inductor`). Workflows like `dynamo-unittest`
 are already non-mandatory — failures there don't block merging but do
 create noise in trunk health and may trigger autorevert.
+
+## Disabling individual tests
+
+To disable a flaky/broken test without a repo PR, create a GitHub issue
+in pytorch/pytorch with a title like:
+
+    DISABLED test_method_name (__main__.TestClassName)
+
+The test-infra system picks it up, publishes to S3, and CI skips the
+test automatically. Add `Platforms: <platform>` in the issue body to
+restrict the disable. Valid platforms: `mac`, `win`, `linux`, `rocm`,
+`xpu`, `asan`, `dynamo`, `dynamo_wrapped`, `inductor`, `slow`.
+No Python-version filtering is supported.
+
+## Known persistent breakage
+
+Track things we know are broken but are being handled elsewhere, so
+sitrep doesn't re-investigate them each time.
+
+- **dynamo-unittest / Python 3.13** — `test_input_no_stdout_fileno`
+  (dynamo_core) and `test_namedtuple_default_values_Tensor_type`
+  (dynamo_wrapped shard 2) are persistently red. Pending work by
+  William Wen on dynamo_wrapped. Non-mandatory workflow, not blocking
+  merges. (As of 2026-05-08)
+
+- **vllm multi_model_processor_test** — persistently red, marked
+  unstable in the job name. (As of 2026-05-08)
