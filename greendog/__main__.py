@@ -13,6 +13,7 @@ from .client import HudClient, PROJECT_ROOT
 from .diff import render_diff
 from .fetch import collect
 from .report import render
+from .triage import cmd_triage
 
 RUNS_DIR = PROJECT_ROOT / "runs"
 
@@ -103,6 +104,16 @@ def main():
     p_diff.add_argument("before", help="path to earlier runs/{ts} dir or raw.json")
     p_diff.add_argument("after", help="path to later runs/{ts} dir or raw.json")
     p_diff.set_defaults(func=cmd_diff)
+
+    p_triage = sub.add_parser(
+        "triage", help="adjudicate OSS PRs needing triage (maintainer engagement)"
+    )
+    p_triage.add_argument(
+        "--apply", action="store_true",
+        help="label mark_triaged PRs + add engaged maintainers as reviewers",
+    )
+    p_triage.add_argument("--raw", action="store_true", help="output raw JSON verdicts")
+    p_triage.set_defaults(func=cmd_triage)
 
     args = ap.parse_args()
     args.func(args)

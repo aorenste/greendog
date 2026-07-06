@@ -381,12 +381,17 @@ automation entirely.)
 
 ### Workflow implementation note
 
-To adjudicate a batch, condense each PR to
-`{number,title,author,labels,reviewRequests,reviews:[{a,assoc,state,body}],
-comments:[{a,assoc,body}]}` (strip bot/author-echo noise, truncate
-bodies), then fan out subagents over chunks (~8 PRs each) applying the
-rubric above. Cross-check the LLM verdicts against a deterministic
-`authorAssociation` scan — they should agree on which PRs have
-non-author, non-bot MEMBER/COLLABORATOR engagement; the LLM's added
-value is judging drive-by-vs-substantive. This is a good candidate to
-turn into a real greendog script once the rubric stabilizes.
+Step 1 is implemented deterministically as `greendog triage` (see
+`greendog/triage.py`) — no LLM needed, because the engagement signal is
+purely GitHub's `authorAssociation`.  `greendog triage` prints a dry-run
+table; `greendog triage --apply` labels the `mark_triaged` PRs and adds
+the engaged maintainer as a reviewer where missing.  The module encodes
+the caveats above as data (`BOT_COMMAND_PREFIXES`, `CLAIMED_LABELS`).
+
+This was originally prototyped as a subagent workflow (condense each PR,
+fan out over chunks, apply the rubric), and the LLM verdicts agreed
+exactly with the deterministic scan — the only judgment the LLM added
+was drive-by-vs-substantive, which is now handled by
+`BOT_COMMAND_PREFIXES`.  Keep the subagent-workflow pattern in reserve
+for the *later* triage steps (beyond "is someone engaged?") that need
+real judgment; those are not yet built.
