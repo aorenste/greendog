@@ -303,3 +303,90 @@ sitrep doesn't re-investigate them each time.
 
 - **vllm multi_model_processor_test** — persistently red, marked
   unstable in the job name. (As of 2026-05-08)
+
+## OSS PR triage modality
+
+A second greendog modality (beyond CI health): keep the pytorch/pytorch
+OSS-PR-triage queue moving. The queue is the set of open, non-draft PRs
+that carry the `open source` label but NOT the `triaged` label and are
+not yet approved. Maintainers are supposed to look at each and either
+engage or apply `triaged`; the queue accretes when nobody does.
+
+### The search query
+
+The canonical "needs triage" GitHub search:
+
+```
+is:pr repo:pytorch/pytorch base:main -label:triaged draft:false
+label:"open source" NOT WIP NOT TESTING in:title -review:approved
+sort:updated-desc is:open
+```
+
+Fetch it via `gh api -X GET search/issues -f q='<query>' -f per_page=100`.
+Then pull per-PR detail with
+`gh pr view <n> --repo pytorch/pytorch --json number,title,author,createdAt,updatedAt,labels,reviewRequests,reviews,comments`.
+
+### Step 1: "is a maintainer already engaged?"
+
+The first (and currently only) triage step: if someone with merge/review
+rights is ALREADY engaged on the PR, we can just bulk-mark it `triaged`
+— a human is on the hook, so it isn't stuck.
+
+**The signal is `authorAssociation`** on comments and reviews:
+- `MEMBER` or `COLLABORATOR` = has merge/review rights (a "maintainer").
+- `CONTRIBUTOR` / `NONE` = outside contributor or passerby — does NOT count.
+
+Rules for deciding a maintainer is engaged (→ `mark_triaged`):
+- Count a comment/review only if its author is `MEMBER`/`COLLABORATOR`,
+  is NOT the PR author (authors defending their own PR don't count even
+  if they're maintainers), and is NOT a bot (`claude`, `pytorch-bot`,
+  `pytorchmergebot`, `pytorchbot`, `facebook-github-bot`, `*bot`).
+- A real review (CHANGES_REQUESTED / COMMENTED / APPROVED) or a
+  substantive comment (design discussion, questions, requesting changes)
+  counts.
+- A maintainer merely LISTED in `reviewRequests` but who never
+  commented/reviewed does NOT count as engaged.
+- **Mechanical drive-bys don't count.** `@pytorchbot fix-lint` and
+  similar bot-command comments are not real engagement — mark such PRs
+  `uncertain`, not triaged.
+- **jansel's `@claude review these changes` is NOT ownership.** Jason
+  Ansel runs bot automation that leaves `@claude review these changes`
+  on OSS PRs to help unstick CI; per direct agreement with him this does
+  NOT mean he's signed up to review or land the PR. Do not mark such PRs
+  triaged on that basis alone, and do not add him as a reviewer for it.
+  (If he leaves a real human review, that counts normally.)
+
+### Step 2: on-the-hook people must actually be reviewers
+
+If we conclude a maintainer is "on the hook" for a PR, they should be a
+requested reviewer on it. When marking triaged, also add the engaged
+maintainer via `gh pr edit <n> --repo pytorch/pytorch --add-reviewer <user>`
+if they are not already in `reviewRequests`. (Note: `gh pr edit
+--add-reviewer` takes ONE reviewer per flag; in zsh, looping
+`read -ra` breaks — add reviewers one at a time.)
+
+Apply the label with
+`gh pr edit <n> --repo pytorch/pytorch --add-label triaged`.
+
+### mergedog coordination
+
+`mergedog` is Edward's own landing automation. A PR labeled `mergedog`
+means someone has claimed it for landing. Whoever claims it should have
+marked themselves as a reviewer on the PR — so a `mergedog` PR normally
+already shows an engaged maintainer and will be caught by Step 1. Don't
+fight over these: if it's under mergedog it's owned. (jansel's
+automation similarly now only acts on PRs carrying the `mergedog` label,
+and there are `jansel-agent-skip` / `agents-banned` labels that skip his
+automation entirely.)
+
+### Workflow implementation note
+
+To adjudicate a batch, condense each PR to
+`{number,title,author,labels,reviewRequests,reviews:[{a,assoc,state,body}],
+comments:[{a,assoc,body}]}` (strip bot/author-echo noise, truncate
+bodies), then fan out subagents over chunks (~8 PRs each) applying the
+rubric above. Cross-check the LLM verdicts against a deterministic
+`authorAssociation` scan — they should agree on which PRs have
+non-author, non-bot MEMBER/COLLABORATOR engagement; the LLM's added
+value is judging drive-by-vs-substantive. This is a good candidate to
+turn into a real greendog script once the rubric stabilizes.
