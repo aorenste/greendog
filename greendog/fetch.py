@@ -25,10 +25,22 @@ def fetch_sevs(client: HudClient) -> list[dict]:
 
 
 def fetch_hud_grid(client: HudClient, hours: int) -> dict:
-    """Walk pages until the oldest commit on a page is past the cutoff."""
+    """Walk pages until the oldest commit on a page is past the cutoff.
+
+    Each HUD page returns its own ``jobNames`` list, and every commit's
+    ``jobs`` array is positionally aligned to *that page's* names. Different
+    pages cover different commit ranges and therefore expose different job
+    sets/orders, so we cannot reuse page 0's names for later pages — doing so
+    silently misattributes every later page's cells to the wrong job. Instead
+    we build a canonical union of names (first-seen order) and realign every
+    commit's cells to it by name, padding absent columns with ``{}``.
+    """
     cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
-    all_rows: list[dict] = []
-    job_names: list[str] = []
+    canonical_names: list[str] = []
+    seen_names: set[str] = set()
+    # (row, {job_name: cell}) — cells keyed by name so we can realign at the end
+    # once the full canonical name set is known.
+    collected: list[tuple[dict, dict]] = []
     page = 0
     while page < 20:  # safety cap; ~50/page * 20 = 1000 commits
         data = client.get_json(
@@ -38,9 +50,26 @@ def fetch_hud_grid(client: HudClient, hours: int) -> dict:
         rows = data.get("shaGrid", []) or []
         if not rows:
             break
-        if not job_names:
-            job_names = data.get("jobNames", []) or []
-        all_rows.extend(rows)
+        page_names = data.get("jobNames", []) or []
+        # jobNames are this page's column headers and the source of truth for
+        # names. We assume they're unique within a page (HUD headers are); if a
+        # name ever repeats, the canonical column is added once and the later
+        # cell wins below — the duplicate column collapses. Acceptable since it
+        # shouldn't happen in practice.
+        for name in page_names:
+            if name not in seen_names:
+                seen_names.add(name)
+                canonical_names.append(name)
+        for row in rows:
+            cells = row.get("jobs") or []
+            # Key each cell by its page-local column name. zip is intentionally
+            # lenient (not strict=True): a row shorter than page_names leaves
+            # the missing trailing columns to be filled with {} at realign
+            # time, and a row longer than page_names drops the unnamed extra
+            # cells (no header ⇒ unusable). We prefer graceful degradation to
+            # raising — this tool runs autonomously and one malformed row
+            # shouldn't sink the whole report.
+            collected.append((row, dict(zip(page_names, cells))))
         oldest_t = rows[-1].get("time")
         if not oldest_t:
             break
@@ -48,8 +77,17 @@ def fetch_hud_grid(client: HudClient, hours: int) -> dict:
         if oldest < cutoff:
             break
         page += 1
-    in_window = [r for r in all_rows if _parse_time(r["time"]) >= cutoff]
-    return {"shaGrid": in_window, "jobNames": job_names, "pages_walked": page + 1}
+    in_window = []
+    for row, cells_by_name in collected:
+        if _parse_time(row["time"]) < cutoff:
+            continue
+        realigned = [cells_by_name.get(name, {}) for name in canonical_names]
+        in_window.append({**row, "jobs": realigned})
+    return {
+        "shaGrid": in_window,
+        "jobNames": canonical_names,
+        "pages_walked": page + 1,
+    }
 
 
 def fetch_advisor_verdicts(client: HudClient, shas: list[str]) -> list[dict]:
